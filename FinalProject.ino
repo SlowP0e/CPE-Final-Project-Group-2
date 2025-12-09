@@ -3,11 +3,13 @@
  * Group 2
  * Members:
  * - Humberto Cortez
- * - Member 2
- * - Member 3
+ * - Mason Chacon
+ * - Evan Barnett
+ * - Riley Padilla
  */
 
 #include <Arduino.h>
+#include <LiquidCrystal.h>
 
 // Pin Definitions
 
@@ -63,10 +65,13 @@ void U0putChar(unsigned char ch);
 void printString(const char* str);
 
 
-// Main Functions
+// Main Program
+
+LiquidCrystal lcd(PIN_DIS_RS, PIN_DIS_EN, PIN_DIS_D4, PIN_DIS_D5, PIN_DIS_D6, PIN_DIS_D7);
 
 void setup(){
     U0Init(9600);
+    lcd.begin(16, 2);
 }
 
 void loop(){
