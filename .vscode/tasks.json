@@ -1,0 +1,41 @@
+{
+    "tasks": [
+        {
+            "type": "shell",
+            "label": "Compile Arduino",
+            "command": "arduino-cli compile --fqbn arduino:avr:mega \"${workspaceFolder}/FinalProject\"",
+            "problemMatcher": []
+        },
+        {
+            "type": "shell",
+            "label": "Upload Arduino",
+            "command": "arduino-cli upload -p /dev/cu.usbmodem* --fqbn arduino:avr:mega \"${workspaceFolder}/FinalProject\"",
+            "problemMatcher": [],
+            "dependsOn": "Stop Monitors",
+        },
+        {
+            "type": "shell",
+            "label": "Stop Monitors",
+            "command": "killall \"avrdude\" 2>/dev/null || true"
+        },
+        {
+            "type": "shell",
+            "label": "Monitor Arduino",
+            "command": "arduino-cli monitor -p /dev/cu.usbmodem* -c baudrate=9600",
+            "problemMatcher": []
+        },
+        {
+            "label": "Build -> Upload -> Monitor",
+            "dependsOn": [
+                "Compile Arduino",
+                "Upload Arduino",
+                "Monitor Arduino"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "dependsOrder": "sequence"
+        }
+    ],
+}
