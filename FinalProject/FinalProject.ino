@@ -17,7 +17,7 @@
 #define PIN_LED_BLUE   7    // PH4 D7. OUT
 #define PIN_LED_GREEN  8    // PH5 D8. OUT
 #define PIN_LED_YELLOW 9    // PH6 D9. OUT
-#define PIN_LED_RED    10    // PB4 D10 OUT
+#define PIN_LED_RED    10   // PB4 D10 OUT
 
 #define PIN_BTN_START  2    // PE4 D2  IN
 #define PIN_BTN_STOP   3    // PE5 D3  IN
@@ -54,14 +54,15 @@ extern LiquidCrystal lcd;
 // Prototypes
 void initIdleStateHardware();
 void handleIdleState();
+void handleErrorState();   // ERROR state handler
 
 bool isStopPressed();
+bool isClearPressed();     // CLEAR button (reset)
 bool isWaterLow();
 float readTempC_stub();
 float readHumidity_stub();
 void printString(const char* str);   // <-- MUST be above uartLog()
 void uartLog(const char* msg);
-
 
 enum SystemState {
     STATE_DISABLED,
@@ -74,24 +75,20 @@ volatile SystemState currentState = STATE_DISABLED;
 volatile bool startPressed = false;
 
 void ISR_startButton() {
-    startPressed = true; //ISR start button
+    startPressed = true; // ISR start button
 }
 
 void initDisabledStateHardware() {
 
     // Yellow LED = PIN_LED_YELLOW = D9 = PH6
-    
     DDRH |= (1 << 6);    // Sets PH6 as OUTPUT
     PORTH |= (1 << 6);   // LED ON at startup (DISABLED)
 
-    
     DDRE &= ~(1 << 4);   // PE4 input
     PORTE |= (1 << 4);   // Enable pull-up
 
-    
     // Attachs interrupt to INT4
     // digitalPinToInterrupt(2) == 4
-  
     attachInterrupt(digitalPinToInterrupt(2), ISR_startButton, FALLING);
 }
 
@@ -108,8 +105,6 @@ void handleDisabledState() {
         PORTH &= ~(1 << 6);
 
         currentState = STATE_IDLE;
-
-        
     }
 }
 
@@ -125,13 +120,19 @@ void initIdleStateHardware() {
   DDRE &= ~(1 << 5);
   PORTE |= (1 << 5);
 
-  // (Optional) Clear button input setup if you want later:
-  // DDRG &= ~(1 << 5); PORTG |= (1 << 5);
+  // Clear button: PG5 (D4) input with pull-up
+  DDRG &= ~(1 << 5);
+  PORTG |= (1 << 5);
 }
 
 bool isStopPressed() {
   // Active LOW with pull-up
   return ((PINE & (1 << 5)) == 0);
+}
+
+bool isClearPressed() {
+  // Active LOW with pull-up
+  return ((PING & (1 << 5)) == 0);
 }
 
 bool isWaterLow() {
@@ -182,7 +183,7 @@ void handleIdleState() {
   // Water level monitored continuously
   if (isWaterLow()) {
     uartLog("[EVENT] WATER LOW -> ERROR");
-    PORTB &= ~(1 << 6); // fan off if neccessary
+    PORTB &= ~(1 << 6); // fan off if necessary
     firstEntry = true;
     currentState = STATE_ERROR;
     return;
@@ -206,7 +207,6 @@ void handleIdleState() {
 
     lastLCDUpdate = now;
 
-    
     if (t > TEMP_HIGH_THRESHOLD_C) {
       uartLog("[EVENT] TEMP HIGH -> RUNNING");
       firstEntry = true;
@@ -216,22 +216,55 @@ void handleIdleState() {
   }
 }
 
+void handleErrorState() {
+  static bool firstEntry = true;
+
+  if (firstEntry) {
+    uartLog("[STATE] ENTER ERROR");
+
+    // RED ON, all others OFF
+    PORTH &= ~((1 << 4) | (1 << 5) | (1 << 6)); // Blue, Green, Yellow OFF
+    PORTB |=  (1 << 4);                        // Red ON
+
+    // Fan OFF
+    PORTB &= ~(1 << 6);
+
+    // Error message on LCD
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("ERROR");
+    lcd.setCursor(0, 1);
+    lcd.print("Low Water!");
+
+    firstEntry = false;
+  }
+
+  // Reset button returns to IDLE if water is OK
+  if (isClearPressed() && !isWaterLow()) {
+    uartLog("[EVENT] RESET -> IDLE");
+    firstEntry = true;
+    currentState = STATE_IDLE;
+  }
+}
+
 // UART Pointers
 volatile unsigned char* pUCSR0A = (unsigned char*) 0x00C0;
 volatile unsigned char* pUCSR0B = (unsigned char*) 0x00C1;
 volatile unsigned char* pUCSR0C = (unsigned char*) 0x00C2;
 volatile unsigned int*  pUBRR0  = (unsigned  int*) 0x00C4;
 volatile unsigned char* pUDR0   = (unsigned char*) 0x00C6;
+
 // ADC Pointers
-volatile unsigned char* pADMUX   = (unsigned char*) 0x7C;
-volatile unsigned char* pADCSRB  = (unsigned char*) 0x7B;
-volatile unsigned char* pADCSRA  = (unsigned char*) 0x7A;
+volatile unsigned char* pADMUX    = (unsigned char*) 0x7C;
+volatile unsigned char* pADCSRB   = (unsigned char*) 0x7B;
+volatile unsigned char* pADCSRA   = (unsigned char*) 0x7A;
 volatile unsigned int*  pADC_DATA = (unsigned int*) 0x78;
+
 // GPIO Pointers
-volatile unsigned char* pDDRB   = (unsigned char*) 0x24;
-volatile unsigned char* pPORTB  = (unsigned char*) 0x25;
-volatile unsigned char* pDDRH   = (unsigned char*) 0x101;
-volatile unsigned char* pPORTH  = (unsigned char*) 0x102;
+volatile unsigned char* pDDRB  = (unsigned char*) 0x24;
+volatile unsigned char* pPORTB = (unsigned char*) 0x25;
+volatile unsigned char* pDDRH  = (unsigned char*) 0x101;
+volatile unsigned char* pPORTH = (unsigned char*) 0x102;
 
 // Functions Declarations
 void U0Init(int baud);
@@ -239,7 +272,6 @@ unsigned char U0KbHit();
 unsigned char U0getChar();
 void U0putChar(unsigned char ch);
 void printString(const char* str);
-
 
 // Main Program
 
@@ -266,25 +298,25 @@ void setup(){
 }
 
 void loop(){
-      switch (currentState) {
+    switch (currentState) {
 
-    case STATE_DISABLED:
-        handleDisabledState();
-        return;   // prevents stepping motor while disabled
+        case STATE_DISABLED:
+            handleDisabledState();
+            return;
 
-    case STATE_IDLE:
-        handleIdleState();
-        return;
+        case STATE_IDLE:
+            handleIdleState();
+            return;
 
-    case STATE_ERROR:
-        // Code
-        break;
+        case STATE_ERROR:
+            handleErrorState();
+            return;
 
-    case STATE_RUNNING:
-        // Code
-        break;
-}
-    
+        case STATE_RUNNING:
+            // Code
+            break;
+    }
+
     int potValue = adcRead(PIN_POTENTIOMETER);
     int stepVal = potValue - stepperPrev;
     if(stepVal != 0) stepper.step(stepVal);
@@ -294,35 +326,31 @@ void loop(){
 // ADC Functions
 
 void adcInit(){
-  // setup the A register
-  *pADCSRA |= 0b10000000; // set bit 7 to 1 to enable the ADC 
-  *pADCSRA &= 0b11011111; // clear bit 5 to 0 to disable the ADC trigger mode
-  *pADCSRA &= 0b11110111; // clear bit 3 to 0 to disable the ADC interrupt 
-  *pADCSRA &= 0b11111000; // clear bit 0-2 to 0 to set prescaler selection to slow reading
-  *pADCSRA |= 0b00000111; // set bit 0-2 to 111 to set prescaler selection to 128 for 16MHz/128=125KHz
+  *pADCSRA |= 0b10000000;
+  *pADCSRA &= 0b11011111;
+  *pADCSRA &= 0b11110111;
+  *pADCSRA &= 0b11111000;
+  *pADCSRA |= 0b00000111;
   
-  // setup the B register
-  *pADCSRB &= 0b11110111; // clear bit 3 to 0 to reset the channel and gain bits
-  *pADCSRB &= 0b11111000; // clear bit 2-0 to 0 to set free running mode
+  *pADCSRB &= 0b11110111;
+  *pADCSRB &= 0b11111000;
   
-  // setup the MUX Register
-  *pADMUX &= 0b01111111; // clear bit 7 to 0 for AVCC analog reference
-  *pADMUX |= 0b01000000; // set bit 6 to 1 for AVCC analog reference
-  *pADMUX &= 0b11011111; // clear bit 5 to 0 for right adjust result
-  *pADMUX &= 0b11100000; // clear bit 4-0 to 0 to reset the channel and gain bits
+  *pADMUX &= 0b01111111;
+  *pADMUX |= 0b01000000;
+  *pADMUX &= 0b11011111;
+  *pADMUX &= 0b11100000;
 }
 
 unsigned int adcRead(unsigned char channel){
-  *pADMUX &= 0b11100000; // clear the channel selection bits (MUX 4:0)
-  *pADCSRB &= 0b11110111; // clear the channel selection bits (MUX 5) hint: it's not in the ADMUX register 
-  *pADMUX |= (channel & 0x1F); // set the channel selection bits for channel
-  *pADCSRA |= 0b01000000; // set bit 6 of ADCSRA to 1 to start a conversion
+  *pADMUX &= 0b11100000;
+  *pADCSRB &= 0b11110111;
+  *pADMUX |= (channel & 0x1F);
+  *pADCSRA |= 0b01000000;
 
-  while((*pADCSRA & 0x40) != 0); // wait for the conversion to complete
+  while((*pADCSRA & 0x40) != 0);
   
-  return (*pADC_DATA & 0x03FF); // return the result in the ADC data register and format the data based on right justification (check the lecture slide)
+  return (*pADC_DATA & 0x03FF);
 }
-
 
 // UART Functions
 
@@ -342,8 +370,8 @@ unsigned char U0KbHit(){
 
 unsigned char U0getChar(){
     return *pUDR0;
-    
 }
+
 void U0putChar(unsigned char ch){
     while((*pUCSR0A & 0x20) == 0);
     *pUDR0 = ch;
