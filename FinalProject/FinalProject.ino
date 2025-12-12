@@ -44,6 +44,56 @@
 #define PIN_STEPPER_IN3 44  // D44
 #define PIN_STEPPER_IN4 45  // D45
 
+enum SystemState {
+    STATE_DISABLED,
+    STATE_IDLE,
+    STATE_ERROR,
+    STATE_RUNNING
+};
+
+volatile SystemState currentState = STATE_DISABLED;
+volatile bool startPressed = false;
+
+void ISR_startButton() {
+    startPressed = true; //ISR start button
+}
+
+void initDisabledStateHardware() {
+
+    // Yellow LED = PIN_LED_YELLOW = D9 = PH6
+    
+    DDRH |= (1 << 6);    // Sets PH6 as OUTPUT
+    PORTH |= (1 << 6);   // LED ON at startup (DISABLED)
+
+    
+    DDRE &= ~(1 << 4);   // PE4 input
+    PORTE |= (1 << 4);   // Enable pull-up
+
+    
+    // Attachs interrupt to INT4
+    // digitalPinToInterrupt(2) == 4
+  
+    attachInterrupt(digitalPinToInterrupt(2), ISR_startButton, FALLING);
+}
+
+void handleDisabledState() {
+
+    // Keeps yellow LED ON while disabled
+    PORTH |= (1 << 6);
+
+    // Only action in disabled state: start button ISR triggers transition
+    if (startPressed) {
+        startPressed = false;
+
+        // Turns off yellow LED when leaving disabled state
+        PORTH &= ~(1 << 6);
+
+        currentState = STATE_IDLE;
+
+        
+    }
+}
+
 // UART Pointers
 volatile unsigned char* pUCSR0A = (unsigned char*) 0x00C0;
 volatile unsigned char* pUCSR0B = (unsigned char*) 0x00C1;
@@ -77,6 +127,8 @@ Stepper stepper(STEPPER_STEPS, PIN_STEPPER_IN1, PIN_STEPPER_IN3, PIN_STEPPER_IN2
 int stepperPrev = 0;
 
 void setup(){
+    initDisabledStateHardware();
+    
     U0Init(9600);
     adcInit();
     lcd.begin(16, 2);
