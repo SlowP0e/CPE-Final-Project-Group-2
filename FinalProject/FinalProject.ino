@@ -44,6 +44,25 @@
 #define PIN_STEPPER_IN3 44  // D44
 #define PIN_STEPPER_IN4 45  // D45
 
+// ---------- IDLE thresholds (tune these) ----------
+#define WATER_LOW_THRESHOLD   200   // ADC units (0-1023). Pick based on your sensor test.
+#define TEMP_HIGH_THRESHOLD_C 25.0  // temp threshold for RUNNING
+
+unsigned long lastLCDUpdate = 0;
+extern LiquidCrystal lcd;
+
+// Prototypes
+void initIdleStateHardware();
+void handleIdleState();
+
+bool isStopPressed();
+bool isWaterLow();
+float readTempC_stub();
+float readHumidity_stub();
+void printString(const char* str);   // <-- MUST be above uartLog()
+void uartLog(const char* msg);
+
+
 enum SystemState {
     STATE_DISABLED,
     STATE_IDLE,
@@ -92,6 +111,109 @@ void handleDisabledState() {
 
         
     }
+}
+
+void initIdleStateHardware() {
+  // LEDs: Blue PH4(D7), Green PH5(D8), Yellow PH6(D9), Red PB4(D10)
+  DDRH |= (1 << 4) | (1 << 5) | (1 << 6);  // PH4/PH5/PH6 outputs
+  DDRB |= (1 << 4);                        // PB4 output
+
+  // Fan: PB6 (D12) output
+  DDRB |= (1 << 6);
+
+  // Stop button: PE5 (D3) input with pull-up
+  DDRE &= ~(1 << 5);
+  PORTE |= (1 << 5);
+
+  // (Optional) Clear button input setup if you want later:
+  // DDRG &= ~(1 << 5); PORTG |= (1 << 5);
+}
+
+bool isStopPressed() {
+  // Active LOW with pull-up
+  return ((PINE & (1 << 5)) == 0);
+}
+
+bool isWaterLow() {
+  unsigned int w = adcRead(PIN_WATER_SENSOR); // A0 channel 0
+  return (w < WATER_LOW_THRESHOLD);
+}
+
+// Stubs for now (so your code compiles). Replace with DHT11 reads later.
+float readTempC_stub()    { return 24.0; }
+float readHumidity_stub() { return 40.0; }
+
+void uartLog(const char* msg) {
+  printString(msg);
+  printString("\n");
+}
+
+void handleIdleState() {
+  static bool firstEntry = true;
+  unsigned long now = millis();
+
+  if (firstEntry) {
+    initIdleStateHardware();
+    uartLog("[STATE] ENTER IDLE");
+
+    // GREEN ON, others OFF
+    PORTH |=  (1 << 5);  // Green PH5 ON
+    PORTH &= ~(1 << 4);  // Blue  PH4 OFF
+    PORTH &= ~(1 << 6);  // Yellow PH6 OFF
+    PORTB &= ~(1 << 4);  // Red   PB4 OFF
+
+    // Fan OFF
+    PORTB &= ~(1 << 6);  // PB6 LOW
+
+    lastLCDUpdate = now;
+    firstEntry = false;
+  }
+
+  // STOP if detects stop button
+  if (isStopPressed()) {
+    uartLog("[EVENT] STOP -> DISABLED");
+    // Ensure fan off and LEDs handled by disabled state
+    PORTB &= ~(1 << 6);
+    firstEntry = true;
+    currentState = STATE_DISABLED;
+    return;
+  }
+
+  // Water level monitored continuously
+  if (isWaterLow()) {
+    uartLog("[EVENT] WATER LOW -> ERROR");
+    PORTB &= ~(1 << 6); // fan off if neccessary
+    firstEntry = true;
+    currentState = STATE_ERROR;
+    return;
+  }
+
+  // LCD update once per minute 
+  if (now - lastLCDUpdate >= 60000UL) {
+    float t = readTempC_stub();
+    float h = readHumidity_stub();
+
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("T:");
+    lcd.print(t, 1);
+    lcd.print("C");
+
+    lcd.setCursor(0, 1);
+    lcd.print("H:");
+    lcd.print(h, 0);
+    lcd.print("%");
+
+    lastLCDUpdate = now;
+
+    
+    if (t > TEMP_HIGH_THRESHOLD_C) {
+      uartLog("[EVENT] TEMP HIGH -> RUNNING");
+      firstEntry = true;
+      currentState = STATE_RUNNING;
+      return;
+    }
+  }
 }
 
 // UART Pointers
@@ -151,8 +273,8 @@ void loop(){
         return;   // prevents stepping motor while disabled
 
     case STATE_IDLE:
-        // Code
-        break;
+        handleIdleState();
+        return;
 
     case STATE_ERROR:
         // Code
