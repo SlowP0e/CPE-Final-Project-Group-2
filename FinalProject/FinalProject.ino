@@ -92,6 +92,25 @@ void setup(){
 }
 
 void loop(){
+      switch (currentState) {
+
+    case STATE_DISABLED:
+        handleDisabledState();
+        return;   // prevents stepping motor while disabled
+
+    case STATE_IDLE:
+        // Code
+        break;
+
+    case STATE_ERROR:
+        // Code
+        break;
+
+    case STATE_RUNNING:
+        // Code
+        break;
+}
+    
     int potValue = adcRead(PIN_POTENTIOMETER);
     int stepVal = potValue - stepperPrev;
     if(stepVal != 0) stepper.step(stepVal);
