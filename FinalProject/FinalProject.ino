@@ -14,14 +14,14 @@
 
 // Pin Definitions
 
-#define PIN_LED_BLUE   4    // PH4 D7. OUT
-#define PIN_LED_GREEN  5    // PH5 D8. OUT
-#define PIN_LED_YELLOW 6    // PH6 D9. OUT
-#define PIN_LED_RED    4    // PB4 D10 OUT
+#define PIN_LED_BLUE   7    // PH4 D7. OUT
+#define PIN_LED_GREEN  8    // PH5 D8. OUT
+#define PIN_LED_YELLOW 9    // PH6 D9. OUT
+#define PIN_LED_RED    10    // PB4 D10 OUT
 
-#define PIN_BTN_START  4    // PE4 D2  IN
-#define PIN_BTN_STOP   5    // PE5 D3  IN
-#define PIN_BTN_CLEAR  5    // PG5 D4  IN
+#define PIN_BTN_START  2    // PE4 D2  IN
+#define PIN_BTN_STOP   3    // PE5 D3  IN
+#define PIN_BTN_CLEAR  4    // PG5 D4  IN
 
 #define PIN_FAN 12          // PB6 D12
 #define PIN_DHT11 22        // PA0 D22
