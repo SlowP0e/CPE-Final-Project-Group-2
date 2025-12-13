@@ -11,6 +11,7 @@
 #include <Arduino.h>
 #include <LiquidCrystal.h>
 #include <Stepper.h>
+#include <DHT.h>
 
 // Pin Definitions
 
@@ -48,21 +49,28 @@
 #define WATER_LOW_THRESHOLD   200   // ADC units (0-1023). Pick based on your sensor test.
 #define TEMP_HIGH_THRESHOLD_C 20.0  // temp threshold for RUNNING
 
+#define LCD_UPDATE_INTERVAL 5000UL  // 5 seconds (was 60000)
+
+#define DHTTYPE DHT11
+
 unsigned long lastLCDUpdate = 0;
 extern LiquidCrystal lcd;
+
+// DHT object
+DHT dht(PIN_DHT11, DHTTYPE);
 
 // Prototypes
 void initIdleStateHardware();
 void handleIdleState();
-void handleErrorState();   // ERROR state handler
-void handleRunningState(); // RUNNING state handler
+void handleErrorState();
+void handleRunningState();
 
 bool isStopPressed();
-bool isClearPressed();     // CLEAR button (reset)
+bool isClearPressed();
 bool isWaterLow();
 float readTempC_stub();
 float readHumidity_stub();
-void printString(const char* str);   // <-- MUST be above uartLog()
+void printString(const char* str);
 void uartLog(const char* msg);
 
 enum SystemState {
@@ -88,31 +96,49 @@ void initDisabledStateHardware() {
     DDRE &= ~(1 << 4);   // PE4 input
     PORTE |= (1 << 4);   // Enable pull-up
 
-    // Attachs interrupt to INT4
-    // digitalPinToInterrupt(2) == 4
     attachInterrupt(digitalPinToInterrupt(2), ISR_startButton, FALLING);
 }
 
 void handleDisabledState() {
+    static bool firstEntry = true;
 
-    // Keeps yellow LED ON while disabled
-    PORTH |= (1 << 6);
+    if (firstEntry) {
+        // YELLOW ON, all others OFF
+        PORTH |=  (1 << 6);                        // Yellow ON
+        PORTH &= ~((1 << 4) | (1 << 5));           // Blue & Green OFF
+        PORTB &= ~(1 << 4);                        // Red OFF
 
-    // Only action in disabled state: start button ISR triggers transition
-    if (startPressed) {
-        startPressed = false;
+        // Fan OFF
+        PORTB &= ~(1 << 6);
 
-        // Turns off yellow LED when leaving disabled state
-        PORTH &= ~(1 << 6);
+        // LCD message
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("DISABLED");
 
-        currentState = STATE_IDLE;
+        firstEntry = false;
     }
+
+    // Only action in disabled state: start button
+    if (startPressed) {
+      startPressed = false;
+
+      // Turns off yellow LED when leaving disabled
+      PORTH &= ~(1 << 6);
+
+      lastLCDUpdate = 0;        // <<< ADD THIS LINE (forces LCD update)
+
+      firstEntry = true;        // allow re-init next time
+      currentState = STATE_IDLE;
+    }
+
 }
+
 
 void initIdleStateHardware() {
   // LEDs: Blue PH4(D7), Green PH5(D8), Yellow PH6(D9), Red PB4(D10)
-  DDRH |= (1 << 4) | (1 << 5) | (1 << 6);  // PH4/PH5/PH6 outputs
-  DDRB |= (1 << 4);                        // PB4 output
+  DDRH |= (1 << 4) | (1 << 5) | (1 << 6);
+  DDRB |= (1 << 4);
 
   // Fan: PB6 (D12) output
   DDRB |= (1 << 6);
@@ -127,23 +153,28 @@ void initIdleStateHardware() {
 }
 
 bool isStopPressed() {
-  // Active LOW with pull-up
   return ((PINE & (1 << 5)) == 0);
 }
 
 bool isClearPressed() {
-  // Active LOW with pull-up
   return ((PING & (1 << 5)) == 0);
 }
 
 bool isWaterLow() {
-  unsigned int w = adcRead(PIN_WATER_SENSOR); // A0 channel 0
+  unsigned int w = adcRead(PIN_WATER_SENSOR);
   return (w < WATER_LOW_THRESHOLD);
 }
 
-// Stubs for now (so your code compiles). Replace with DHT11 reads later.
-float readTempC_stub()    { return 24.0; }
-float readHumidity_stub() { return 40.0; }
+// Replaced stub logic with real DHT11 reads
+float readTempC_stub() {
+  float t = dht.readTemperature();
+  return isnan(t) ? -100.0 : t;
+}
+
+float readHumidity_stub() {
+  float h = dht.readHumidity();
+  return isnan(h) ? -1.0 : h;
+}
 
 void uartLog(const char* msg) {
   printString(msg);
@@ -159,23 +190,27 @@ void handleIdleState() {
     uartLog("[STATE] ENTER IDLE");
 
     // GREEN ON, others OFF
-    PORTH |=  (1 << 5);  // Green PH5 ON
-    PORTH &= ~(1 << 4);  // Blue  PH4 OFF
-    PORTH &= ~(1 << 6);  // Yellow PH6 OFF
-    PORTB &= ~(1 << 4);  // Red   PB4 OFF
+    PORTH |=  (1 << 5);
+    PORTH &= ~(1 << 4);
+    PORTH &= ~(1 << 6);
+    PORTB &= ~(1 << 4);
 
     // Fan OFF
-    PORTB &= ~(1 << 6);  // PB6 LOW
+    PORTB &= ~(1 << 6);
+
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("IDLE");
 
     lastLCDUpdate = now;
     firstEntry = false;
-  }
+  } 
+
 
   // STOP if detects stop button
   if (isStopPressed()) {
     uartLog("[EVENT] STOP -> DISABLED");
-    // Ensure fan off and LEDs handled by disabled state
-    PORTB &= ~(1 << 6);
+    PORTB &= ~(1 << 6);     // Fan OFF
     firstEntry = true;
     currentState = STATE_DISABLED;
     return;
@@ -184,21 +219,29 @@ void handleIdleState() {
   // Water level monitored continuously
   if (isWaterLow()) {
     uartLog("[EVENT] WATER LOW -> ERROR");
-    PORTB &= ~(1 << 6); // fan off if necessary
+    PORTB &= ~(1 << 6);     // Fan OFF
     firstEntry = true;
     currentState = STATE_ERROR;
     return;
   }
 
-  // LCD update once per minute 
-  if (now - lastLCDUpdate >= 60000UL) {
-    float t = readTempC_stub();
+  // -------- CONTROL LOGIC (NOT tied to LCD timing) --------
+  float t_now = readTempC_stub();
+  if (t_now > TEMP_HIGH_THRESHOLD_C) {
+    uartLog("[EVENT] TEMP HIGH -> RUNNING");
+    firstEntry = true;
+    currentState = STATE_RUNNING;
+    return;
+  }
+
+  // -------- LCD DISPLAY (timed separately) --------
+  if (now - lastLCDUpdate >= LCD_UPDATE_INTERVAL) {
     float h = readHumidity_stub();
 
     lcd.clear();
     lcd.setCursor(0, 0);
     lcd.print("T:");
-    lcd.print(t, 1);
+    lcd.print(t_now, 1);
     lcd.print("C");
 
     lcd.setCursor(0, 1);
@@ -207,34 +250,30 @@ void handleIdleState() {
     lcd.print("%");
 
     lastLCDUpdate = now;
-
-    if (t > TEMP_HIGH_THRESHOLD_C) {
-      uartLog("[EVENT] TEMP HIGH -> RUNNING");
-      firstEntry = true;
-      currentState = STATE_RUNNING;
-      return;
-    }
   }
 }
 
+
 void handleRunningState() {
   static bool firstEntry = true;
+  unsigned long now = millis();
 
   if (firstEntry) {
-    uartLog("[STATE] ENTER RUNNING");
-
     // BLUE ON, all others OFF
-    PORTH |=  (1 << 4);                        // Blue PH4 ON
-    PORTH &= ~((1 << 5) | (1 << 6));           // Green & Yellow OFF
+    PORTH |=  (1 << 4);                        // Blue ON
+    PORTH &= ~((1 << 5) | (1 << 6));           // Green, Yellow OFF
     PORTB &= ~(1 << 4);                        // Red OFF
 
     // Fan ON
-    PORTB |= (1 << 6);                         // PB6 HIGH
+    PORTB |=  (1 << 6);
+
+    // Force LCD to update immediately on entry
+    lastLCDUpdate = 0;
 
     firstEntry = false;
   }
 
-  // Water level has priority
+  // Water level has highest priority
   if (isWaterLow()) {
     PORTB &= ~(1 << 6); // Fan OFF
     firstEntry = true;
@@ -242,29 +281,42 @@ void handleRunningState() {
     return;
   }
 
-  // Return to IDLE if temperature drops
-  if (readTempC_stub() <= TEMP_HIGH_THRESHOLD_C) {
+  // Transition to IDLE as soon as temperature drops below threshold
+  float t_now = readTempC_stub();
+  if (t_now <= TEMP_HIGH_THRESHOLD_C) {
     PORTB &= ~(1 << 6); // Fan OFF
     firstEntry = true;
     currentState = STATE_IDLE;
     return;
   }
+
+  // LCD shows Temperature + Water reading (timed)
+  if (now - lastLCDUpdate >= LCD_UPDATE_INTERVAL) {
+    unsigned int w = adcRead(PIN_WATER_SENSOR);   // raw ADC 0-1023
+
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("T:");
+    lcd.print(t_now, 1);
+    lcd.print("C");
+
+    lcd.setCursor(0, 1);
+    lcd.print("W:");
+    lcd.print(w);
+
+    lastLCDUpdate = now;
+  }
 }
+
 
 void handleErrorState() {
   static bool firstEntry = true;
 
   if (firstEntry) {
-    uartLog("[STATE] ENTER ERROR");
-
-    // RED ON, all others OFF
-    PORTH &= ~((1 << 4) | (1 << 5) | (1 << 6)); // Blue, Green, Yellow OFF
-    PORTB |=  (1 << 4);                        // Red ON
-
-    // Fan OFF
+    PORTH &= ~((1 << 4) | (1 << 5) | (1 << 6));
+    PORTB |=  (1 << 4);
     PORTB &= ~(1 << 6);
 
-    // Error message on LCD
     lcd.clear();
     lcd.setCursor(0, 0);
     lcd.print("ERROR");
@@ -274,9 +326,7 @@ void handleErrorState() {
     firstEntry = false;
   }
 
-  // Reset button returns to IDLE if water is OK
   if (isClearPressed() && !isWaterLow()) {
-    uartLog("[EVENT] RESET -> IDLE");
     firstEntry = true;
     currentState = STATE_IDLE;
   }
@@ -317,10 +367,10 @@ int stepperPrev = 0;
 
 void setup(){
     initDisabledStateHardware();
-    
     U0Init(9600);
     adcInit();
     lcd.begin(16, 2);
+    dht.begin();
     stepper.setSpeed(26);
     stepperPrev = adcRead(PIN_POTENTIOMETER);
 
@@ -334,22 +384,10 @@ void setup(){
 
 void loop(){
     switch (currentState) {
-
-        case STATE_DISABLED:
-            handleDisabledState();
-            return;
-
-        case STATE_IDLE:
-            handleIdleState();
-            return;
-
-        case STATE_ERROR:
-            handleErrorState();
-            return;
-
-        case STATE_RUNNING:
-            handleRunningState();
-            return;
+        case STATE_DISABLED: handleDisabledState(); return;
+        case STATE_IDLE:     handleIdleState();     return;
+        case STATE_ERROR:    handleErrorState();    return;
+        case STATE_RUNNING:  handleRunningState();  return;
     }
 
     int potValue = adcRead(PIN_POTENTIOMETER);
@@ -383,7 +421,6 @@ unsigned int adcRead(unsigned char channel){
   *pADCSRA |= 0b01000000;
 
   while((*pADCSRA & 0x40) != 0);
-  
   return (*pADC_DATA & 0x03FF);
 }
 
