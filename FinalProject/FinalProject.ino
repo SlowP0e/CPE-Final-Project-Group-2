@@ -55,6 +55,7 @@ extern LiquidCrystal lcd;
 void initIdleStateHardware();
 void handleIdleState();
 void handleErrorState();   // ERROR state handler
+void handleRunningState(); // RUNNING state handler
 
 bool isStopPressed();
 bool isClearPressed();     // CLEAR button (reset)
@@ -216,6 +217,40 @@ void handleIdleState() {
   }
 }
 
+void handleRunningState() {
+  static bool firstEntry = true;
+
+  if (firstEntry) {
+    uartLog("[STATE] ENTER RUNNING");
+
+    // BLUE ON, all others OFF
+    PORTH |=  (1 << 4);                        // Blue PH4 ON
+    PORTH &= ~((1 << 5) | (1 << 6));           // Green & Yellow OFF
+    PORTB &= ~(1 << 4);                        // Red OFF
+
+    // Fan ON
+    PORTB |= (1 << 6);                         // PB6 HIGH
+
+    firstEntry = false;
+  }
+
+  // Water level has priority
+  if (isWaterLow()) {
+    PORTB &= ~(1 << 6); // Fan OFF
+    firstEntry = true;
+    currentState = STATE_ERROR;
+    return;
+  }
+
+  // Return to IDLE if temperature drops
+  if (readTempC_stub() <= TEMP_HIGH_THRESHOLD_C) {
+    PORTB &= ~(1 << 6); // Fan OFF
+    firstEntry = true;
+    currentState = STATE_IDLE;
+    return;
+  }
+}
+
 void handleErrorState() {
   static bool firstEntry = true;
 
@@ -313,8 +348,8 @@ void loop(){
             return;
 
         case STATE_RUNNING:
-            // Code
-            break;
+            handleRunningState();
+            return;
     }
 
     int potValue = adcRead(PIN_POTENTIOMETER);
