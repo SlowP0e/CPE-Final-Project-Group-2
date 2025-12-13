@@ -14,31 +14,34 @@
 #include <DHT.h>
 
 // Pin Definitions
+#define PIN_LED_BLUE      "PH4"   // PH4 D7. OUT
+#define PIN_LED_GREEN     "PH5"   // PH5 D8. OUT
+#define PIN_LED_YELLOW    "PH6"   // PH6 D9. OUT
+#define PIN_LED_RED       "PB4"   // PB4 D10 OUT
 
-#define PIN_LED_BLUE   7    // PH4 D7. OUT
-#define PIN_LED_GREEN  8    // PH5 D8. OUT
-#define PIN_LED_YELLOW 9    // PH6 D9. OUT
-#define PIN_LED_RED    10   // PB4 D10 OUT
+#define PIN_BTN_START     "PE4"   // PE4 D2  IN
+#define PIN_BTN_STOP      "PE5"   // PE5 D3  IN
+#define PIN_BTN_CLEAR     "PG5"   // PG5 D4  IN
 
-#define PIN_BTN_START  2    // PE4 D2  IN
-#define PIN_BTN_STOP   3    // PE5 D3  IN
-#define PIN_BTN_CLEAR  4    // PG5 D4  IN
+#define PIN_FAN           "PB6"   // PB6 D12
+#define PIN_DHT11         22      // PA0 D22, to be used with DHT library 
+#define PIN_WATER_SENSOR  0       // Analog 0, to be used with adcRead()
+#define PIN_POTENTIOMETER 1       // Analog 1, to be used with adcRead()
 
-#define PIN_FAN 12          // PB6 D12
-#define PIN_DHT11 22        // PA0 D22
-#define PIN_WATER_SENSOR 0  // Analog 0, to be used with adcRead()
-#define PIN_POTENTIOMETER 1 // Analog 1, to be used with adcRead()
-
+// Pin definitions for clock
 #define PIN_CLK_SDA 20      // 
 #define PIN_CLK_SCL 21      // 
 
+// Pin definitions for LCD
 #define PIN_DIS_RS 30       // D30
 #define PIN_DIS_EN 31       // D31
 #define PIN_DIS_D4 32       // D32
 #define PIN_DIS_D5 33       // D33
 #define PIN_DIS_D6 34       // D34
 #define PIN_DIS_D7 35       // D35
+#define LCD_UPDATE_INTERVAL 5000UL  // 5 seconds (was 60000)
 
+// Pin definitions for stepper motor library
 #define STEPPER_STEPS 1024
 #define PIN_STEPPER_IN1 42  // D42
 #define PIN_STEPPER_IN2 43  // D43
@@ -49,9 +52,28 @@
 #define WATER_LOW_THRESHOLD   200   // ADC units (0-1023). Pick based on your sensor test.
 #define TEMP_HIGH_THRESHOLD_C 20.0  // temp threshold for RUNNING
 
-#define LCD_UPDATE_INTERVAL 5000UL  // 5 seconds (was 60000)
-
 #define DHTTYPE DHT11
+
+
+// UART Pointers
+volatile unsigned char* pUCSR0A = (unsigned char*) 0x00C0;
+volatile unsigned char* pUCSR0B = (unsigned char*) 0x00C1;
+volatile unsigned char* pUCSR0C = (unsigned char*) 0x00C2;
+volatile unsigned int*  pUBRR0  = (unsigned  int*) 0x00C4;
+volatile unsigned char* pUDR0   = (unsigned char*) 0x00C6;
+
+// ADC Pointers
+volatile unsigned char* pADMUX    = (unsigned char*) 0x7C;
+volatile unsigned char* pADCSRB   = (unsigned char*) 0x7B;
+volatile unsigned char* pADCSRA   = (unsigned char*) 0x7A;
+volatile unsigned int*  pADC_DATA = (unsigned int*) 0x78;
+
+// GPIO Pointers
+volatile unsigned char* pDDRB  = (unsigned char*) 0x24;
+volatile unsigned char* pPORTB = (unsigned char*) 0x25;
+volatile unsigned char* pDDRH  = (unsigned char*) 0x101;
+volatile unsigned char* pPORTH = (unsigned char*) 0x102;
+volatile unsigned char* pDDRE  =
 
 unsigned long lastLCDUpdate = 0;
 extern LiquidCrystal lcd;
@@ -332,24 +354,6 @@ void handleErrorState() {
   }
 }
 
-// UART Pointers
-volatile unsigned char* pUCSR0A = (unsigned char*) 0x00C0;
-volatile unsigned char* pUCSR0B = (unsigned char*) 0x00C1;
-volatile unsigned char* pUCSR0C = (unsigned char*) 0x00C2;
-volatile unsigned int*  pUBRR0  = (unsigned  int*) 0x00C4;
-volatile unsigned char* pUDR0   = (unsigned char*) 0x00C6;
-
-// ADC Pointers
-volatile unsigned char* pADMUX    = (unsigned char*) 0x7C;
-volatile unsigned char* pADCSRB   = (unsigned char*) 0x7B;
-volatile unsigned char* pADCSRA   = (unsigned char*) 0x7A;
-volatile unsigned int*  pADC_DATA = (unsigned int*) 0x78;
-
-// GPIO Pointers
-volatile unsigned char* pDDRB  = (unsigned char*) 0x24;
-volatile unsigned char* pPORTB = (unsigned char*) 0x25;
-volatile unsigned char* pDDRH  = (unsigned char*) 0x101;
-volatile unsigned char* pPORTH = (unsigned char*) 0x102;
 
 // Functions Declarations
 void U0Init(int baud);
@@ -394,6 +398,73 @@ void loop(){
     int stepVal = potValue - stepperPrev;
     if(stepVal != 0) stepper.step(stepVal);
     stepperPrev = potValue;
+}
+
+// Helpers for GPIO
+
+void getDDRPORTPIN(char* pin, volatile unsigned char** ddr, volatile unsigned char** port, volatile unsigned char** pinReg){
+    switch(*(pin + 1)){
+        case 'B':
+            *ddr = pDDRB;
+            *port = pPORTB;
+            break;
+        case 'E':
+            *ddr = pDDRE;
+            *port = pPORTE;
+            *pinReg = pPINE;
+            break;
+        case 'G':
+            *ddr = pDDRG;
+            *port = pPORTG;
+            *pinReg = pPING;
+            break;
+        case 'H':
+            *ddr = pDDRH;
+            *port = pPORTH;
+            break;
+        default:
+            return;
+    }
+}
+
+void setPinMode(char* pin, char mode){
+    volatile unsigned char* ddr;
+    volatile unsigned char* port;
+    getDDRandPORT(pin, &ddr, &port);
+    
+    unsigned char pinNum = *(pin + 2) - '0';
+
+    if(mode == 'o'){ // output
+        *ddr |= (1 << pinNum);
+    }else if(mode == 'i'){ // input
+        *ddr &= ~(1 << pinNum);
+    }else if(mode == 'ip'){ // input with pull-up
+        *ddr &= ~(1 << pinNum);
+        *port |= (1 << pinNum);
+    }
+}
+
+void setPinValue(char* pin, bool value){
+    volatile unsigned char* port;
+
+    switch(*(pin + 1)){
+        case 'B':
+            port = pPORTB;
+            break;
+        case 'H':
+            port = pPORTH;
+            break;
+        default:
+            return;
+    }
+
+    unsigned char pinNum = *(pin + 2) - '0';
+
+    if(value == true){
+        *port |= (1 << pinNum);
+    }else{
+        *port &= ~(1 << pinNum);
+    }
 }
 
 // ADC Functions
