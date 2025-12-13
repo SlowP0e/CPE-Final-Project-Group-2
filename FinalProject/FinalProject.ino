@@ -46,7 +46,7 @@
 
 // ---------- IDLE thresholds (tune these) ----------
 #define WATER_LOW_THRESHOLD   200   // ADC units (0-1023). Pick based on your sensor test.
-#define TEMP_HIGH_THRESHOLD_C 25.0  // temp threshold for RUNNING
+#define TEMP_HIGH_THRESHOLD_C 20.0  // temp threshold for RUNNING
 
 unsigned long lastLCDUpdate = 0;
 extern LiquidCrystal lcd;
