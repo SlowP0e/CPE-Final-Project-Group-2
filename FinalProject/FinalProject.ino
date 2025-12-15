@@ -21,14 +21,14 @@
 #define PIN_LED_RED       "PB4"   // PB4 D10 OUT
 
 #define PIN_BTN_START     "PE4"   // PE4 D2  IN
-#define PIN_BTN_START_ISR 2       // D2, to be used with interrupt
+#define PIN_BTN_START_ISR 2       // D2
 #define PIN_BTN_STOP      "PE5"   // PE5 D3  IN
 #define PIN_BTN_RESET     "PG5"   // PG5 D4  IN
 
 #define PIN_FAN           "PB6"   // PB6 D12  OUT
-#define PIN_DHT11         22      // PA0 D22, to be used with DHT library
-#define PIN_WATER_SENSOR  0       // Analog 0, to be used with adcRead()
-#define PIN_POTENTIOMETER 1       // Analog 1, to be used with adcRead()
+#define PIN_DHT11         22      // PA0 D22
+#define PIN_WATER_SENSOR  0       // Analog 0
+#define PIN_POTENTIOMETER 1       // Analog 1
 
 // Pin definitions for LCD
 #define PIN_DIS_RS 30       // D30
@@ -46,8 +46,8 @@
 #define PIN_STEPPER_IN3 44  // D44
 #define PIN_STEPPER_IN4 45  // D45
 
-// ---------- IDLE thresholds (tune these) ----------
-#define WATER_LOW_THRESHOLD   200   // ADC units (0-1023). Pick based on your sensor test.
+//IDLE thresholds 
+#define WATER_LOW_THRESHOLD   200   // ADC units (0-1023). 
 #define TEMP_HIGH_THRESHOLD_C 20.0  // temp threshold for RUNNING
 
 #define DHTTYPE DHT11
@@ -228,7 +228,7 @@ bool isWaterLow() {
   return (w < WATER_LOW_THRESHOLD);
 }
 
-// Replaced stub logic with real DHT11 reads
+// DHT11 Reads
 float readTempC() {
   float t = dht.readTemperature();
   if (isnan(t)) {
@@ -283,7 +283,7 @@ void handleIdleState() {
     firstEntry = false;
   }
 
-  // STOP if detects stop button
+  // Stops if detects stop button
   if (isStopPressed()) {
     uartLog("[EVENT] STOP -> DISABLED");
     PORTB &= ~(1 << 6);   // Fan OFF
@@ -301,7 +301,7 @@ void handleIdleState() {
     return;
   }
 
-  // -------- LCD DISPLAY (timed separately) --------
+  // LCD DISPLAY 
   if (now - lastSensorPoll >= LCD_UPDATE_INTERVAL) {
     float t_now = readTempC();
     lastSensorPoll = now;
