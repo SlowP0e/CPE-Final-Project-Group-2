@@ -186,7 +186,7 @@ void handleDisabledState() {
 
     // Only action in disabled state: start button
     if (startPressed) {
-      lastSensorPoll = 0;        // <<< ADD THIS LINE (forces LCD update)
+      lastSensorPoll = 0;        // LCD update
 
       firstEntry = true;        // allow re-init next time
       currentState = STATE_IDLE;
@@ -296,7 +296,7 @@ void handleIdleState() {
     return;
   }
 
-  // -------- LCD DISPLAY (timed separately) --------
+  // LCD Display
   if (now - lastSensorPoll >= LCD_UPDATE_INTERVAL) {
     float t_now = readTempC();
     if (t_now > TEMP_HIGH_THRESHOLD_C) {
