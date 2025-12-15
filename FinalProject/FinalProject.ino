@@ -49,7 +49,7 @@
 #define PIN_STEPPER_IN3 44  // D44
 #define PIN_STEPPER_IN4 45  // D45
 
-// ---------- IDLE thresholds (tune these) ----------
+// IDLE thresholds 
 #define WATER_LOW_THRESHOLD   200   // ADC units (0-1023). Pick based on your sensor test.
 #define TEMP_HIGH_THRESHOLD_C 20.0  // temp threshold for RUNNING
 
