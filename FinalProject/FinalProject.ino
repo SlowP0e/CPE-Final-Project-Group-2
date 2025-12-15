@@ -12,6 +12,7 @@
 #include <LiquidCrystal.h>
 #include <Stepper.h>
 #include <DHT.h>
+#include <I2C_RTC.h>
 
 // Pin Definitions
 #define PIN_LED_BLUE      "PH4"   // PH4 D7  OUT
@@ -24,14 +25,10 @@
 #define PIN_BTN_STOP      "PE5"   // PE5 D3  IN
 #define PIN_BTN_RESET     "PG5"   // PG5 D4  IN
 
-#define PIN_FAN           "PB6"   // PB6 D12
+#define PIN_FAN           "PB6"   // PB6 D12  OUT
 #define PIN_DHT11         22      // PA0 D22, to be used with DHT library
 #define PIN_WATER_SENSOR  0       // Analog 0, to be used with adcRead()
 #define PIN_POTENTIOMETER 1       // Analog 1, to be used with adcRead()
-
-// Pin definitions for clock
-#define PIN_CLK_SDA 20      //
-#define PIN_CLK_SCL 21      //
 
 // Pin definitions for LCD
 #define PIN_DIS_RS 30       // D30
@@ -49,7 +46,7 @@
 #define PIN_STEPPER_IN3 44  // D44
 #define PIN_STEPPER_IN4 45  // D45
 
-// IDLE thresholds 
+// ---------- IDLE thresholds (tune these) ----------
 #define WATER_LOW_THRESHOLD   200   // ADC units (0-1023). Pick based on your sensor test.
 #define TEMP_HIGH_THRESHOLD_C 20.0  // temp threshold for RUNNING
 
@@ -100,8 +97,9 @@ void U0putChar(unsigned char ch);
 // Main Program
 
 LiquidCrystal lcd(PIN_DIS_RS, PIN_DIS_EN, PIN_DIS_D4, PIN_DIS_D5, PIN_DIS_D6, PIN_DIS_D7);
-unsigned long lastSensorPoll = 0;
+static DS1307 RTC;
 Stepper stepper(STEPPER_STEPS, PIN_STEPPER_IN1, PIN_STEPPER_IN3, PIN_STEPPER_IN2, PIN_STEPPER_IN4);
+unsigned long lastSensorPoll = 0;
 volatile SystemState currentState = STATE_DISABLED;
 volatile bool startPressed = false;
 int stepperPrev = 0;
@@ -111,6 +109,8 @@ void setup(){
     adcInit();
     lcd.begin(16, 2);
     dht.begin();
+    RTC.begin();
+    RTC.setTime(0, 0, 0);
 
     DDRH |= (1 << 4); // BLUE
     DDRH |= (1 << 5); // GREEN
@@ -137,7 +137,6 @@ void setup(){
 
     stepper.setSpeed(26);
     stepperPrev = adcRead(PIN_POTENTIOMETER);
-
 }
 
 void loop(){
@@ -181,12 +180,13 @@ void handleDisabledState() {
 
         uartLog("[STATE] ENTER DISABLED");
 
+        startPressed = false;
         firstEntry = false;
     }
 
     // Only action in disabled state: start button
     if (startPressed) {
-      lastSensorPoll = 0;        // LCD update
+      lastSensorPoll = 0;        // <<< ADD THIS LINE (forces LCD update)
 
       firstEntry = true;        // allow re-init next time
       currentState = STATE_IDLE;
@@ -248,10 +248,19 @@ float readHumidity() {
 }
 
 void uartLog(const char* msg) {
-  int i = 0;
-  while(msg[i] != '\0'){
+  unsigned int sec = RTC.getSeconds();
+  unsigned int min = RTC.getMinutes();
+  unsigned int hr  = RTC.getHours();
+
+  char timestamp[20];
+  sprintf(timestamp, "[%02u:%02u:%02u] ", hr, min, sec);
+
+  for(int i = 0; timestamp[i] != '\0'; i++){
+      U0putChar(timestamp[i]);
+  }
+
+  for(int i = 0; msg[i] != '\0'; i++){
       U0putChar(msg[i]);
-      i++;
   }
   U0putChar('\n');
 }
@@ -268,10 +277,6 @@ void handleIdleState() {
 
     // Fan OFF
     PORTB &= ~(1 << 6);
-
-    lcd.clear();
-    lcd.setCursor(0, 0);
-    lcd.print("IDLE");
 
     uartLog("[STATE] ENTER IDLE");
     lastSensorPoll = 0;
@@ -296,9 +301,10 @@ void handleIdleState() {
     return;
   }
 
-  // LCD Display
+  // -------- LCD DISPLAY (timed separately) --------
   if (now - lastSensorPoll >= LCD_UPDATE_INTERVAL) {
     float t_now = readTempC();
+    lastSensorPoll = now;
     if (t_now > TEMP_HIGH_THRESHOLD_C) {
       uartLog("[EVENT] TEMP HIGH -> RUNNING");
       firstEntry = true;
@@ -317,8 +323,6 @@ void handleIdleState() {
     lcd.print("H: ");
     lcd.print(h, 0);
     lcd.print("%");
-
-    lastSensorPoll = now;
   }
 }
 
@@ -354,6 +358,7 @@ void handleRunningState() {
     uartLog("[EVENT] STOP -> DISABLED");
     PORTB &= ~(1 << 6);   // Fan OFF
     currentState = STATE_DISABLED;
+    firstEntry = true;
     return;
   }
 
@@ -400,6 +405,8 @@ void handleErrorState() {
     lcd.print("ERROR");
     lcd.setCursor(0, 1);
     lcd.print("Low Water!");
+
+    uartLog("[EVENT] ENTER ERROR");
 
     firstEntry = false;
   }
